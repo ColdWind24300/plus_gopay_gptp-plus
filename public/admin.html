@@ -1336,7 +1336,7 @@
         /* stat-icon 暗色软背景也整体调亮一点 */
         .stat-icon { box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.04); }
 
-        /* "开通中"行内 badge */
+        /* 运行中行内 badge */
         .status-badge[style*="color: #f59e0b"] {
             color: #b45309 !important;
         }
@@ -2222,16 +2222,6 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
                         </button>
                         <input type="text" id="cdk_search" class="asset-input" placeholder="搜索激活码 / 卡密"
                             style="width: 220px;" oninput="handleCdkSearch(this.value)">
-                        <div class="filter-dropdown" data-filter="cdk_generate_type" style="min-width: 110px;">
-                            <button class="filter-trigger" onclick="toggleFilterMenu('cdk_generate_type')">
-                                <span id="current_cdk_type_label">自助</span>
-                                <i data-lucide="chevron-down"></i>
-                            </button>
-                            <div id="filter_menu_cdk_generate_type" class="filter-menu">
-                                <button class="filter-option active" onclick="selectGenerateType('自助')">自助</button>
-                                <button class="filter-option" onclick="selectGenerateType('成品')">成品</button>
-                            </div>
-                        </div>
                         <input type="number" id="cdk_count" value="1" min="1" max="100" class="asset-input"
                             style="width: 80px;">
                         <button class="btn btn-primary" onclick="generateCDKs(this)">
@@ -2312,6 +2302,10 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
                 <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
                     <div class="panel-title">账号资源管理</div>
                     <div class="panel-actions" style="display: flex; gap: 12px; align-items: center;">
+                        <select id="product_gen_plan_type" class="asset-input" style="width: 150px;">
+                            <option value="plus">Plus 流程</option>
+                            <option value="free">Free 注册</option>
+                        </select>
                         <input type="number" id="product_gen_count" value="1" min="1" max="100" class="asset-input" style="width: 80px;" placeholder="数量">
                         <button class="btn btn-primary" onclick="startProductGeneration(this)">
                             <i data-lucide="play"></i>
@@ -2373,6 +2367,7 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
                             <tr>
                                 <th class="select-header" width="60px">选择</th>
                                 <th>邮箱账号</th>
+                                <th width="90px">类型</th>
                                 <th width="150px">使用CDK</th>
                                 <th width="180px">KEY</th>
                                 <th width="200px">生产时间</th>
@@ -2390,7 +2385,7 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
         <div id="logs" class="page-view">
             <div class="page-header">
                 <h1>任务管理</h1>
-                <p>查看与管理数据库中的任务记录（含自助开通与后台成品生产）</p>
+                <p>查看与管理成品生产及兑换记录</p>
             </div>
             <div class="panel">
                 <div class="runtime-log-toolbar log-page-toolbar">
@@ -2406,7 +2401,7 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
                         <i data-lucide="square"></i>
                         停止成品批量生产
                     </button>
-                    <span class="log-page-toolbar-hint">默认每 3 秒自动拉取概览与下方表格；停止后仅在你点击「立即刷新」时更新。可在表格中删除单条任务记录。「停止成品批量」仅针对后台批量成品任务；前台自助开通由子进程执行，无法在此强制杀进程，可开维护模式拒绝新单。</span>
+                    <span class="log-page-toolbar-hint">默认每 3 秒自动拉取概览与下方表格；停止后仅在你点击「立即刷新」时更新。可在表格中删除单条记录；「停止成品批量」只停止后台生产，不影响前台兑换。</span>
                 </div>
                 <div class="table-container">
                     <table>
@@ -3693,7 +3688,7 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
                 const code = typeof cdk === 'string' ? cdk : (cdk.code || '');
                 const status = typeof cdk === 'string' ? 'unused' : (cdk.status || 'unused');
                 const shipped = typeof cdk === 'string' ? false : Boolean(cdk.shipped);
-                const type = typeof cdk === 'string' ? '自助' : (cdk.type || '自助');
+                const type = '成品';
                 const usedAt = typeof cdk === 'string' ? null : cdk.used_at;
                 const createdAt = typeof cdk === 'string' ? null : cdk.created_at;
 
@@ -3703,11 +3698,9 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
                     <td><span class="cdk-copy" onclick="copyCDK('${code}')"><code>${code}</code><i data-lucide="copy"></i></span></td>
                     <td style="text-align:center"><span class="status-badge ${type === '成品' ? 'status-success' : 'status-running'}" style="background: ${type === '成品' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(99, 102, 241, 0.15)'}; color: ${type === '成品' ? '#34d399' : '#818cf8'}">${type}</span></td>
                     <td style="text-align:center"><span class="readonly-switch ${shipped ? 'active' : ''}" title="${shipped ? '已出库' : '未出库'}"></span></td>
-                    <td>${status === 'processing'
-                        ? '<span class="status-badge" style="background: rgba(245, 158, 11, 0.15); color: #f59e0b;">开通中</span>'
-                        : (status === 'used'
-                            ? '<span class="status-badge status-success">已使用</span>'
-                            : '<span class="status-badge status-running">未使用</span>')}</td>
+                    <td>${status === 'used'
+                        ? '<span class="status-badge status-success">已使用</span>'
+                        : '<span class="status-badge status-running">未使用</span>'}</td>
                     <td>${usedAt || '-'}</td>
                     <td style="text-align:center">
                         <button class="btn-delete" onclick="deleteCDK('${code}')">
@@ -3824,7 +3817,7 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
                 <tr>
                     <td>${l.time}</td>
                     <td><code>${l.cdk || '-'}</code></td>
-                    <td style="text-align:center"><span class="status-badge ${l.type === '成品' ? 'status-success' : 'status-running'}" style="background: ${l.type === '成品' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(99, 102, 241, 0.15)'}; color: ${l.type === '成品' ? '#34d399' : '#818cf8'}; padding: 4px 10px; font-size: 11px;">${l.type || '自助'}</span></td>
+                    <td style="text-align:center"><span class="status-badge status-success" style="padding: 4px 10px; font-size: 11px;">${l.type || '成品兑换'}</span></td>
                     <td><code>${l.token}</code></td>
                     <td>${l.message || '-'}</td>
                     <td>
@@ -3872,20 +3865,9 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
             lucide.createIcons();
         }
 
-        let currentGenerateType = '自助';
-        function selectGenerateType(type) {
-            currentGenerateType = type;
-            const dropdown = document.querySelector('.filter-dropdown[data-filter="cdk_generate_type"]');
-            dropdown.querySelector('span').innerText = type;
-            dropdown.querySelectorAll('.filter-option').forEach(item => {
-                item.classList.toggle('active', item.innerText === type);
-            });
-            closeFilterMenus();
-        }
-
         async function generateCDKs(btn) {
             const count = parseInt(document.getElementById('cdk_count').value, 10) || 1;
-            const type = currentGenerateType;
+            const type = '成品';
             const original = btn.innerHTML;
             btn.innerHTML = '<i data-lucide="loader" class="animate-spin"></i> 生成中...';
             lucide.createIcons();
@@ -4219,14 +4201,16 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
             
             tbody.innerHTML = pageData.items.map((p) => {
                 const isActive = p.status === '正常';
+                const isFree = String(p.plan_type || 'plus').toLowerCase() === 'free';
                 return `
                 <tr>
                     <td class="select-cell"><input type="checkbox" ${selectedItems.product.has(String(p.id)) ? 'checked' : ''} onchange="toggleSelection('product', '${p.id}', this.checked)"></td>
                     <td><code>${p.email}</code></td>
+                    <td><span class="status-badge ${isFree ? 'status-warning' : 'status-success'}">${isFree ? 'Free' : 'Plus'}</span></td>
                     <td>${p.claimed_cdk ? `<code>${p.claimed_cdk}</code>` : '<span style="color: var(--text-dim);">-</span>'}</td>
                     <td>
                         ${p.imap_key
-                            ? `<a href="https://imap.chiyiyi.cloud/?key=${encodeURIComponent(p.imap_key)}" target="_blank" rel="noopener noreferrer" style="color: var(--accent); text-decoration: none; font-family: monospace;">${p.imap_key}</a>`
+                            ? `<code style="color: var(--accent); font-family: monospace;">${p.imap_key}</code>`
                             : '<span style="color: var(--text-dim);">-</span>'}
                     </td>
                     <td>${p.time}</td>
@@ -4572,7 +4556,8 @@ http://USER-session-{session}:PASS@your-proxy.example.com:1000"></textarea>
 
         async function startProductGeneration(btn) {
             const count = parseInt(document.getElementById('product_gen_count').value, 10) || 1;
-            await runAdminProductGeneration(btn, '/api/admin/products/generate', { count }, {
+            const planType = document.getElementById('product_gen_plan_type')?.value || 'plus';
+            await runAdminProductGeneration(btn, '/api/admin/products/generate', { count, planType }, {
                 count,
                 loadingText: '生产中...',
                 initialText: `准备生产 ${count} 个成品号...`,

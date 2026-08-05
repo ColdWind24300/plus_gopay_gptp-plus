@@ -3,8 +3,10 @@ const { fork } = require('child_process');
 const path = require('path');
 const axios = require('axios');
 const store = require('./mysql-store');
+const inboxEmail = require('./inbox-email');
 const runtimeLog = require('./runtime-log');
 const { getImapAuthHeaders, forceRefreshImapToken } = require('./imap-auth');
+const IMAP_BASE_URL = String(process.env.IMAP_BASE_URL || '').trim().replace(/\/+$/, '');
 
 const CONFIG = {
     MAX_ACCOUNT_RETRIES: 15,
@@ -15,7 +17,7 @@ const CONFIG = {
     CHILD_IDLE_TIMEOUT_MS: 60 * 1000
 };
 
-const IMAP_ADMIN_EMAIL_API = 'https://imap.chiyiyi.cloud/api/admin/emails';
+const IMAP_ADMIN_EMAIL_API = IMAP_BASE_URL ? `${IMAP_BASE_URL}/api/admin/emails` : '';
 const OAUTH_ADD_PHONE_ERROR = '当前账号触发手机号验证';
 
 // 进程级 inbox 域名黑名单：被 API 拒绝过的域名，本进程内不再传给子进程
@@ -853,7 +855,26 @@ async function runProtocolProcess(email, onProgress, runtimeJobKey = '', inboxBu
     throw new Error(lastError || `协议提取失败，已超过 ${CONFIG.MAX_PROTOCOL_RETRIES} 次重试`);
 }
 
+async function cleanupRegistrationInbox(inboxBundle, email, reason) {
+    if (!inboxBundle?.inboxJwt || inboxBundle.emailSource !== 'inbox') {
+        return;
+    }
+
+    const jwt = inboxBundle.inboxJwt;
+    inboxBundle.inboxJwt = '';
+    try {
+        await inboxEmail.deleteAddress({
+            baseUrl: inboxBundle.inboxApiBase,
+            jwt
+        });
+        console.log(`🗑️ [Inbox] ${reason}，已清理临时邮箱: ${email}`);
+    } catch (error) {
+        console.warn(`⚠️ [Inbox] ${reason}，清理临时邮箱失败 (${email}): ${error.message}`);
+    }
+}
+
 async function startProductCreation(cdk, progressCallback, options = {}) {
+    const planType = String(options.planType || 'plus').trim().toLowerCase() === 'free' ? 'free' : 'plus';
     let accountAttempt = 0;
     let topupFailureCount = 0;
     const runtimeJobKey = String(options.jobKey || '');
@@ -868,6 +889,7 @@ async function startProductCreation(cdk, progressCallback, options = {}) {
 
     while (accountAttempt < CONFIG.MAX_ACCOUNT_RETRIES) {
         accountAttempt += 1;
+        let currentInboxBundle = null;
         progressCallback({
             progress: 5,
             message: `正在尝试注册第 ${accountAttempt} 个账号...`
@@ -881,10 +903,30 @@ async function startProductCreation(cdk, progressCallback, options = {}) {
             const { email, accessToken } = regResult;
             // 注册阶段建立的邮箱后端凭证，要带给 oauth_login 用同一套 API 取 OAuth 验证码
             const inboxBundle = {
+                email,
                 emailSource: regResult.emailSource || '',
                 inboxJwt: regResult.inboxJwt || '',
                 inboxApiBase: regResult.inboxApiBase || ''
             };
+            currentInboxBundle = inboxBundle;
+
+            if (planType === 'free') {
+                progressCallback({
+                    progress: 100,
+                    message: 'Free 注册成功！',
+                    result: {
+                        email,
+                        accessToken,
+                        planType: 'free'
+                    }
+                });
+                return {
+                    success: true,
+                    email,
+                    accessToken,
+                    planType: 'free'
+                };
+            }
 
             let activationAttempt = 0;
 
@@ -1085,6 +1127,7 @@ async function startProductCreation(cdk, progressCallback, options = {}) {
 
                 if (analysis.message.includes('无激活权限')) {
                     console.warn(`[Product] Account ${email}: No activation permission. Switching to new account...`);
+                    await cleanupRegistrationInbox(inboxBundle, email, '账号无激活权限，切换账号');
                     progressCallback({
                         progress: Math.min(20 + accountAttempt * 5, 55),
                         message: '该账号无激活权限，准备更换下一个账号...'
@@ -1128,6 +1171,8 @@ async function startProductCreation(cdk, progressCallback, options = {}) {
 
                 throw new Error(analysis.message || 'Plus 开通任务异常退出');
             }
+
+            await cleanupRegistrationInbox(inboxBundle, email, 'Plus 激活流程未完成');
         } catch (error) {
             console.error(`[Product] Error in attempt ${accountAttempt}:`, error.message);
 
@@ -1148,6 +1193,7 @@ async function startProductCreation(cdk, progressCallback, options = {}) {
             }
 
             if (isFatal) {
+                await cleanupRegistrationInbox(currentInboxBundle, currentInboxBundle?.email || '', 'Plus 流程终止');
                 if (error.message.includes('系统原因导致上号失败次数过多')) {
                     throw new Error('系统原因导致上号失败次数过多,请稍后重试');
                 }
@@ -1162,9 +1208,11 @@ async function startProductCreation(cdk, progressCallback, options = {}) {
             }
 
             if (accountAttempt >= CONFIG.MAX_ACCOUNT_RETRIES) {
+                await cleanupRegistrationInbox(currentInboxBundle, currentInboxBundle?.email || '', '达到最大重试次数');
                 break;
             }
 
+            await cleanupRegistrationInbox(currentInboxBundle, currentInboxBundle?.email || '', '切换到下一个账号');
             await sleep(CONFIG.RETRY_DELAY_MS);
         }
     }

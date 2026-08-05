@@ -162,6 +162,8 @@ async function ensureLegacyColumns() {
     await ensureColumn('app_config', 'created_at', 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP');
     await ensureColumn('app_config', 'updated_at', 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP');
 
+    await ensureColumn('product_assets', 'plan_type', "VARCHAR(16) NOT NULL DEFAULT 'plus'");
+
     await ensureColumn('phone_assets', 'sms_api_key', "VARCHAR(255) NOT NULL DEFAULT ''");
     await ensureColumn('phone_assets', 'usage_count', 'INT NOT NULL DEFAULT 0');
     await ensureColumn('phone_assets', 'sort_order', 'INT NOT NULL DEFAULT 0');
@@ -190,7 +192,7 @@ async function ensureLegacyColumns() {
     await ensureColumn('cdk_codes', 'used_at', 'TIMESTAMP NULL DEFAULT NULL');
     await ensureColumn('cdk_codes', 'created_at', 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP');
     await ensureColumn('cdk_codes', 'updated_at', 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP');
-    await ensureColumn('cdk_codes', 'type', "VARCHAR(16) NOT NULL DEFAULT '自助'");
+    await ensureColumn('cdk_codes', 'type', "VARCHAR(16) NOT NULL DEFAULT '成品'");
 
     await ensureColumn('task_logs', 'token_preview', "VARCHAR(64) NOT NULL DEFAULT ''");
     await ensureColumn('task_logs', 'phone', 'VARCHAR(32) NULL');
@@ -241,6 +243,7 @@ function parseAdminProductGenerationTask(row) {
     let workerCount = 0;
     let aborted = false;
     let lastError = '';
+    let planType = 'plus';
 
     if (payload && payload.kind === 'admin_product_generation') {
         targetCount = Math.max(0, Number(payload.targetCount) || 0);
@@ -250,6 +253,7 @@ function parseAdminProductGenerationTask(row) {
         workerCount = Math.max(0, Number(payload.workerCount) || 0);
         aborted = Boolean(payload.aborted);
         lastError = String(payload.lastError || '').trim();
+        planType = String(payload.planType || 'plus').trim().toLowerCase() === 'free' ? 'free' : 'plus';
     }
 
     if (!targetCount) {
@@ -271,7 +275,8 @@ function parseAdminProductGenerationTask(row) {
         failedCount,
         workerCount,
         aborted,
-        lastError
+        lastError,
+        planType
     };
 }
 
@@ -372,7 +377,8 @@ async function getAdminData() {
                 COALESCE(SUM(used_at IS NOT NULL), 0) AS used_count,
                 COALESCE(SUM(used_at IS NULL), 0) AS unused_count
              FROM cdk_codes
-             WHERE is_active = 1`
+             WHERE is_active = 1
+               AND type = '成品'`
         )
     ]);
 
@@ -453,7 +459,7 @@ async function getAdminData() {
                 time: row.display_time,
                 token: isAdminProductGeneration ? '系统生成' : row.token_preview,
                 cdk: isAdminProductGeneration ? '系统生成' : (row.cdk_code || ''),
-                type: isAdminProductGeneration ? '成品生产' : (row.cdk_type || '自助'),
+                type: isAdminProductGeneration ? '成品生产' : (row.cdk_type === '成品' ? '成品兑换' : '历史任务'),
                 phone: row.phone,
                 message: row.message || '',
                 cardLast4: row.card_last4 || '',
@@ -586,24 +592,14 @@ async function listCdks() {
         `SELECT cdk_code, shipped_at, used_at, type
          FROM cdk_codes
          WHERE is_active = 1
+           AND type = '成品'
          ORDER BY created_at DESC, id DESC`
     );
 
-    const runningRows = await runQuery(
-        `SELECT cdk_code, MAX(updated_at) AS updated_at
-         FROM task_logs
-         WHERE status = 'running'
-           AND cdk_code IS NOT NULL
-         GROUP BY cdk_code`
-    );
-    const runningSet = new Set(runningRows.map((row) => String(row.cdk_code || '').trim()).filter(Boolean));
-
     return rows.map((row) => ({
         code: row.cdk_code,
-        status: runningSet.has(String(row.cdk_code || '').trim())
-            ? 'processing'
-            : (row.used_at ? 'used' : 'unused'),
-        type: row.type || '自助',
+        status: row.used_at ? 'used' : 'unused',
+        type: '成品',
         shipped: Boolean(row.shipped_at),
         shipped_at: row.shipped_at
             ? new Date(row.shipped_at).toLocaleString('zh-CN', { hour12: false }).replace(/\//g, '-')
@@ -634,8 +630,8 @@ async function insertCdks(cdks, options = {}) {
         };
     }
 
-    const values = normalized.map((cdk) => [cdk, 1, options.type || '自助']);
-    console.log(`正在插入 ${values.length} 个 CDK, 类型: ${options.type || '自助'}`);
+    const values = normalized.map((cdk) => [cdk, 1, '成品']);
+    console.log(`正在插入 ${values.length} 个成品 CDK`);
 
     const [result] = await getPool().query(
         `INSERT INTO cdk_codes (cdk_code, is_active, type) VALUES ?`,
@@ -1341,7 +1337,7 @@ async function createTaskLog({ tokenPreview, cdkCode, phone, cardLast4, status, 
     const now = new Date();
     const displayTime = now.toLocaleString('zh-CN', { hour12: false });
     const jobKey = `${now.getTime()}-${Math.random().toString(36).slice(2, 10)}`;
-    const message = String(status) === 'running' ? '正在开通中' : null;
+    const message = String(status) === 'running' ? '任务处理中' : null;
 
     await runExecute(
         `INSERT INTO task_logs (job_key, token_preview, cdk_code, phone, card_last4, status, message, progress, display_time, raw_output)
@@ -1437,7 +1433,9 @@ async function listProducts() {
                         LIMIT 1
                     )
                 ) AS claimed_cdk,
+                p.token,
                 p.file_path,
+                p.plan_type,
                 p.status,
                 p.shipped,
                 p.created_at
@@ -1450,12 +1448,12 @@ async function listProducts() {
     }));
 }
 
-async function addProduct(email, filePath, password = null, token = null, imapKey = null) {
+async function addProduct(email, filePath, password = null, token = null, imapKey = null, planType = 'plus') {
     await runExecute(
-        `INSERT INTO product_assets (email, file_path, password, token, imap_key) 
-         VALUES (?, ?, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE file_path = VALUES(file_path), password = VALUES(password), token = VALUES(token), imap_key = COALESCE(VALUES(imap_key), imap_key)`,
-        [email, filePath, password, token, imapKey]
+        `INSERT INTO product_assets (email, file_path, password, token, imap_key, plan_type)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE file_path = VALUES(file_path), password = VALUES(password), token = COALESCE(VALUES(token), token), imap_key = COALESCE(VALUES(imap_key), imap_key), plan_type = VALUES(plan_type)`,
+        [email, filePath, password, token, imapKey, String(planType || 'plus')]
     );
 }
 
@@ -1539,26 +1537,12 @@ async function claimProductAccount(cdk) {
             [String(cdk), product.id]
         );
 
-        // 5. 创建成功日志
-        const jobKey = `PROD-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-        await connection.query(
-            `INSERT INTO task_logs (job_key, token_preview, cdk_code, status, message, progress, display_time)
-             VALUES (?, ?, ?, 'success', ?, 100, ?)`,
-            [
-                jobKey,
-                'PRODUCT_CLAIM',
-                cdk,
-                `成品号兑换成功: ${product.email}`,
-                new Date().toLocaleString('zh-CN', { hour12: false }).replace(/\//g, '-')
-            ]
-        );
-
         return {
             email: product.email,
             password: product.password,
             token: product.token,
             imapKey: product.imap_key || '',
-            jobKey
+            planType: product.plan_type || 'plus'
         };
     });
 }
@@ -1595,6 +1579,29 @@ async function markProductShippedByEmail(email, shipped = 1) {
 }
 
 async function getClaimedProductDownloadInfo(cdk) {
+    const normalizedCdk = String(cdk);
+
+    // 新兑换直接通过号池关联查询，不依赖或创建任务记录。
+    const claimedRows = await runQuery(
+        `SELECT email, token, imap_key, file_path, plan_type
+         FROM product_assets
+         WHERE claimed_cdk = ?
+         ORDER BY id DESC
+         LIMIT 1`,
+        [normalizedCdk]
+    );
+    const claimedProduct = claimedRows[0];
+    if (claimedProduct) {
+        return {
+            email: claimedProduct.email,
+            token: claimedProduct.token || '',
+            filePath: claimedProduct.file_path || '',
+            imapKey: claimedProduct.imap_key || '',
+            planType: claimedProduct.plan_type || 'plus'
+        };
+    }
+
+    // 兼容 claimed_cdk 上线前已经完成的历史兑换。
     const logRows = await runQuery(
         `SELECT message, raw_output
          FROM task_logs
@@ -1602,63 +1609,34 @@ async function getClaimedProductDownloadInfo(cdk) {
            AND status = 'success'
          ORDER BY created_at DESC, id DESC
          LIMIT 1`,
-        [String(cdk)]
+        [normalizedCdk]
     );
-
-    const logRow = logRows[0] || null;
+    const logRow = logRows[0];
     if (!logRow) {
         return null;
     }
 
     const message = String(logRow.message || '');
-    let email = '';
+    const messageMatch = message.match(/成品号(?:兑换|创建)成功:\s*(.+)$/);
+    let email = String(messageMatch?.[1] || '').trim();
     let filePath = '';
     let imapKey = '';
-
-    const messageMatch = message.match(/成品号(?:兑换|创建)成功:\s*(.+)$/);
-    if (messageMatch) {
-        email = String(messageMatch[1] || '').trim();
-    }
+    let planType = '';
 
     try {
         const parsed = logRow.raw_output ? JSON.parse(logRow.raw_output) : null;
-        if (!email) {
-            email = String(parsed?.email || '').trim();
-        }
+        email = email || String(parsed?.email || '').trim();
         filePath = String(parsed?.sub2apiPath || parsed?.filePath || '').trim();
         imapKey = String(parsed?.imapKey || '').trim();
+        planType = String(parsed?.planType || '').trim();
     } catch (_) { }
 
-    if (filePath && imapKey) {
-        return {
-            email,
-            filePath,
-            imapKey
-        };
-    }
-
     if (!email) {
-        const claimedRows = await runQuery(
-            `SELECT email, imap_key, file_path
-             FROM product_assets
-             WHERE claimed_cdk = ?
-             ORDER BY id DESC
-             LIMIT 1`,
-            [String(cdk)]
-        );
-        const claimedProduct = claimedRows[0];
-        if (!claimedProduct || !claimedProduct.file_path) {
-            return null;
-        }
-        return {
-            email: claimedProduct.email,
-            filePath: filePath || claimedProduct.file_path,
-            imapKey: imapKey || claimedProduct.imap_key || ''
-        };
+        return null;
     }
 
     const productRows = await runQuery(
-        `SELECT email, imap_key, file_path, status, shipped
+        `SELECT email, token, imap_key, file_path, plan_type
          FROM product_assets
          WHERE email = ?
          ORDER BY id DESC
@@ -1666,14 +1644,16 @@ async function getClaimedProductDownloadInfo(cdk) {
         [email]
     );
     const product = productRows[0];
-    if (!product || !product.file_path) {
+    if (!product && !filePath) {
         return null;
     }
 
     return {
-        email: product.email,
-        filePath: filePath || product.file_path,
-        imapKey: imapKey || product.imap_key || ''
+        email: product?.email || email,
+        token: product?.token || '',
+        filePath: filePath || product?.file_path || '',
+        imapKey: imapKey || product?.imap_key || '',
+        planType: planType || product?.plan_type || 'plus'
     };
 }
 

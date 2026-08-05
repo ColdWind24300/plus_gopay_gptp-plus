@@ -3,7 +3,7 @@
 
 -- 1. cdk_codes 扩展字段
 ALTER TABLE cdk_codes
-    ADD COLUMN IF NOT EXISTS type VARCHAR(16) NOT NULL DEFAULT '自助' AFTER updated_at,
+    ADD COLUMN IF NOT EXISTS type VARCHAR(16) NOT NULL DEFAULT '成品' AFTER updated_at,
     ADD COLUMN IF NOT EXISTS fail_count INT NOT NULL DEFAULT 0 AFTER type,
     ADD COLUMN IF NOT EXISTS cooldown_until TIMESTAMP NULL DEFAULT NULL AFTER fail_count;
 

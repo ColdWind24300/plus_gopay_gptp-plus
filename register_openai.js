@@ -6,6 +6,7 @@ const path = require('path');
 const { getImapAuthHeaders } = require('./imap-auth');
 const { fetchLatestOpenAiOtpOnce } = require('./pool-email-imap');
 const inboxEmail = require('./inbox-email');
+const IMAP_BASE_URL = String(process.env.IMAP_BASE_URL || '').trim().replace(/\/+$/, '');
 
 // 使用 stealth 插件
 chromium.use(stealth);
@@ -108,7 +109,7 @@ function normalizeCloudEmail(email) {
 async function getLatestCode(email, maxRetries = 24, excludeCode = '', options = {}) {
     const normalizedEmail = normalizeCloudEmail(email);
     console.log(`📨 [IMAP] 正在为 ${normalizedEmail} 获取验证码...`);
-    const url = 'https://imap.chiyiyi.cloud/api/admin/all-messages?limit=15';
+    const url = `${IMAP_BASE_URL}/api/admin/all-messages?limit=15`;
     const onNoNewCodeFor30Seconds = typeof options.onNoNewCodeFor30Seconds === 'function'
         ? options.onNoNewCodeFor30Seconds
         : null;
@@ -1064,6 +1065,7 @@ async function runRegistrationFlow() {
 
     let email = '';
     let inboxJwt = '';
+    let registrationSucceeded = false;
     if (usePoolImap) {
         email = rawPoolEmail;
         console.log(`📬 [邮箱池] 使用预留邮箱 ${email}`);
@@ -1117,7 +1119,9 @@ async function runRegistrationFlow() {
 
     const DEBUG_HEADFUL = process.env.HEADFUL === '1';
     const DEBUG_PAUSE_ON_ERROR_MS = Number(process.env.DEBUG_PAUSE_ON_ERROR_MS || (DEBUG_HEADFUL ? 30000 : 0));
-    const CHROMIUM_CHANNEL = (process.env.CHROMIUM_CHANNEL || '').trim();
+    const rawChromiumChannel = String(process.env.CHROMIUM_CHANNEL || '').trim();
+    // 兼容旧版 .env 加载器把行内注释误读成 channel 的情况。
+    const CHROMIUM_CHANNEL = rawChromiumChannel.startsWith('#') ? '' : rawChromiumChannel;
 
     let browser;
     let page = null;
@@ -1879,6 +1883,7 @@ async function runRegistrationFlow() {
 
         console.log(`🎟️  Access Token 已获取`);
         console.log("🎉 [Success] 注册流程全部完成！");
+        registrationSucceeded = true;
 
         if (poolEmailId) {
             try {
@@ -1924,6 +1929,18 @@ async function runRegistrationFlow() {
 
         if (browser) await browser.close();
         throw e;
+    } finally {
+        if (useInbox && inboxJwt && !registrationSucceeded) {
+            try {
+                await inboxEmail.deleteAddress({
+                    baseUrl: inboxApiBase,
+                    jwt: inboxJwt
+                });
+                console.log(`🗑️ [Inbox] 注册失败，临时邮箱已清理: ${email}`);
+            } catch (cleanupErr) {
+                console.warn(`⚠️ [Inbox] 临时邮箱清理失败 (${email}): ${cleanupErr.message}`);
+            }
+        }
     }
 }
 

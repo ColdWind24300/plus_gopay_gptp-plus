@@ -28,7 +28,7 @@
 
 它的常见用途：
 
-- 给 CDK 自助兑换站做后端供货
+- 给 CDK 成品兑换站做后端供货
 - 跑批量 ChatGPT Plus 协议 token，供 Plus API/中转使用
 - 验证一种「PayPal hosted checkout + 风控对抗」的实战方案
 
@@ -252,6 +252,8 @@ MySQL => root@127.0.0.1:3306/plus_papay
 | 邮箱池 CRUD | `/api/admin/pool-emails(/...)` | Bearer |
 | 代理批量测试 | `POST /api/admin/proxy/test` | Bearer |
 | 配置读写 | `GET/POST /api/admin/config` | Bearer |
+
+用户侧兑换只从现有成品号池同步出库。缺货时直接返回错误，不会启动注册、浏览器、支付或 Plus 激活任务；补货只能由后台管理员发起。
 
 ---
 

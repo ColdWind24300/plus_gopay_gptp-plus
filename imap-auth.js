@@ -1,7 +1,7 @@
 const axios = require('axios');
 
-const IMAP_BASE_URL = 'https://imap.chiyiyi.cloud';
-const IMAP_LOGIN_URL = `${IMAP_BASE_URL}/api/login`;
+const IMAP_BASE_URL = String(process.env.IMAP_BASE_URL || '').trim().replace(/\/+$/, '');
+const IMAP_LOGIN_URL = IMAP_BASE_URL ? `${IMAP_BASE_URL}/api/login` : '';
 const IMAP_PASSWORD = process.env.IMAP_ADMIN_PASSWORD || '';
 const IMAP_REFRESH_INTERVAL_MS = 60 * 60 * 1000;
 
@@ -28,6 +28,10 @@ function scheduleRefresh() {
 }
 
 async function refreshImapToken(force = false) {
+    if (!IMAP_BASE_URL) {
+        return '';
+    }
+
     if (!force && cachedToken) {
         return cachedToken;
     }
@@ -78,6 +82,10 @@ async function forceRefreshImapToken() {
 }
 
 async function getImapAuthHeaders(force = false) {
+    if (!IMAP_BASE_URL) {
+        throw new Error('IMAP_BASE_URL 未配置');
+    }
+
     const token = force ? await forceRefreshImapToken() : await ensureImapToken();
     return {
         Authorization: `Bearer ${token}`,
@@ -87,6 +95,10 @@ async function getImapAuthHeaders(force = false) {
 }
 
 async function initializeImapAuth() {
+    if (!IMAP_BASE_URL) {
+        return '';
+    }
+
     if (started) {
         return ensureImapToken();
     }

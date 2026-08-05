@@ -142,7 +142,7 @@ async function run() {
     try {
         console.log(`连接成功: ${DB_USER}@${DB_HOST}:${DB_PORT}/${DB_NAME}`);
 
-        await ensureColumn(connection, 'cdk_codes', 'type', "VARCHAR(16) NOT NULL DEFAULT '自助'");
+        await ensureColumn(connection, 'cdk_codes', 'type', "VARCHAR(16) NOT NULL DEFAULT '成品'");
         await ensureColumn(connection, 'cdk_codes', 'fail_count', 'INT NOT NULL DEFAULT 0');
         await ensureColumn(connection, 'cdk_codes', 'cooldown_until', 'TIMESTAMP NULL DEFAULT NULL');
 

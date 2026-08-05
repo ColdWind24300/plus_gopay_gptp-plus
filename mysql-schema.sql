@@ -49,7 +49,7 @@ CREATE TABLE IF NOT EXISTS cdk_codes (
     used_at TIMESTAMP NULL DEFAULT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    type VARCHAR(16) NOT NULL DEFAULT '自助',
+    type VARCHAR(16) NOT NULL DEFAULT '成品',
     fail_count INT DEFAULT 0,
     cooldown_until TIMESTAMP NULL DEFAULT NULL,
     UNIQUE KEY uniq_cdk_codes_code (cdk_code)
@@ -94,6 +94,7 @@ CREATE TABLE IF NOT EXISTS product_assets (
     password VARCHAR(255) NULL,
     token TEXT NULL,
     file_path VARCHAR(512) NULL,
+    plan_type VARCHAR(16) NOT NULL DEFAULT 'plus',
     status VARCHAR(32) NOT NULL DEFAULT '正常',
     is_active TINYINT(1) NOT NULL DEFAULT 1,
     shipped TINYINT(1) NOT NULL DEFAULT 0,

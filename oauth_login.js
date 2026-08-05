@@ -6,6 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const { getImapAuthHeaders } = require('./imap-auth');
 const inboxEmail = require('./inbox-email');
+const IMAP_BASE_URL = String(process.env.IMAP_BASE_URL || '').trim().replace(/\/+$/, '');
 
 // 使用 stealth 插件
 chromium.use(stealth);
@@ -198,7 +199,7 @@ async function getLatestCode(email, maxRetries = 30, excludeCode = '', options =
     }
 
     console.log(`📨 [IMAP] 正在为 ${normalizedEmail} 获取验证码...`);
-    const url = 'https://imap.chiyiyi.cloud/api/admin/all-messages?limit=15';
+    const url = `${IMAP_BASE_URL}/api/admin/all-messages?limit=15`;
     const onNoNewCodeFor30Seconds = typeof options.onNoNewCodeFor30Seconds === 'function'
         ? options.onNoNewCodeFor30Seconds
         : null;

@@ -36,6 +36,29 @@ async function createAddress({ baseUrl, name = '', domain = '', enablePrefix } =
     };
 }
 
+/**
+ * 删除当前 JWT 所属的临时邮箱。
+ * Cloudflare Mail API 使用用户 JWT 鉴权，而不是管理员密码。
+ */
+async function deleteAddress({ baseUrl, jwt } = {}) {
+    if (!jwt) {
+        return false;
+    }
+
+    const url = `${trimBaseUrl(baseUrl)}/api/delete_address`;
+    const resp = await axios.delete(url, {
+        headers: { Authorization: `Bearer ${jwt}` },
+        timeout: 15000,
+        validateStatus: () => true
+    });
+
+    if (resp.status !== 200) {
+        throw new Error(`删除临时邮箱失败: HTTP ${resp.status}`);
+    }
+
+    return true;
+}
+
 function looksLikeOpenAiVerification(subject, bodyText, fromAddr) {
     const haystack = `${subject || ''}\n${bodyText || ''}\n${fromAddr || ''}`.toLowerCase();
     return /openai|chatgpt|verification|verify|验证码/.test(haystack);
@@ -166,5 +189,6 @@ async function fetchLatestOpenAiOtp({
 module.exports = {
     DEFAULT_API_BASE,
     createAddress,
+    deleteAddress,
     fetchLatestOpenAiOtp
 };
